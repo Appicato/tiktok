@@ -1,31 +1,18 @@
 import cors from "cors";
 import express from "express";
-import fetch from "node-fetch";
 import pkg from "tiktok-live-connector";
 import { WebSocketServer } from "ws";
 
 const { WebcastPushConnection } = pkg;
 
 const PORT = process.env.PORT || 3001;
-const EULER_API_KEY = process.env.EULER_API_KEY; // aus Render Env
 
 const app = express();
 app.use(cors());
 
-// Optional: Proxy-Endpoint, falls DNS bei Render auch mal spinnt
-app.get("/api/live-status/:username", async (req, res) => {
-  const username = req.params.username;
-  const eulerUrl = `https://api.eulerstream.io/api/live/status?username=${username}`;
-  try {
-    const r = await fetch(eulerUrl, {
-      headers: { "x-api-key": EULER_API_KEY },
-    });
-    const data = await r.json();
-    res.json(data);
-  } catch (err) {
-    console.error("❌ Live-Status Fehler:", err);
-    res.status(500).json({ error: "Live-Status nicht abrufbar" });
-  }
+// Einfacher Test-Endpoint
+app.get("/", (req, res) => {
+  res.send("✅ TikTok Backend läuft");
 });
 
 const server = app.listen(PORT, () => {
@@ -69,41 +56,28 @@ function safeGiftData(data) {
   return data.giftDetails ? data : null;
 }
 
-async function isUserLive(username) {
-  try {
-    const eulerUrl = `https://api.eulerstream.io/api/live/status?username=${username}`;
-    const res = await fetch(eulerUrl, {
-      headers: { "x-api-key": EULER_API_KEY },
-    });
-    if (!res.ok) return false;
-    const data = await res.json();
-    return data.live === true;
-  } catch (err) {
-    console.error("Fehler bei Eulerstream API:", err);
-    return false;
-  }
-}
-
 async function startTikTok(username) {
+  // Alte Verbindung schließen
   if (tiktokConnection) {
     await tiktokConnection.disconnect();
     tiktokConnection = null;
   }
 
-  if (!(await isUserLive(username))) {
-    console.log(`⚠️ ${username} ist aktuell nicht live.`);
-    broadcast({ type: "status", live: false, username });
-    return;
-  }
-
-  console.log(`✅ ${username} ist live – verbinde...`);
-  broadcast({ type: "status", live: true, username });
+  console.log(`🔍 Versuche Verbindung zu ${username}...`);
 
   tiktokConnection = new WebcastPushConnection(username);
 
-  await tiktokConnection.connect().catch((err) => {
-    console.error("❌ Verbindung fehlgeschlagen:", err);
-  });
+  try {
+    await tiktokConnection.connect();
+    console.log(`✅ ${username} ist live – verbunden!`);
+    broadcast({ type: "status", live: true, username });
+  } catch (err) {
+    console.log(
+      `⚠️ ${username} ist aktuell nicht live oder Verbindung fehlgeschlagen.`
+    );
+    broadcast({ type: "status", live: false, username });
+    return;
+  }
 
   const safeBroadcast = (type, handler) => {
     tiktokConnection.on(type, (data) => {
@@ -139,7 +113,10 @@ async function startTikTok(username) {
   });
 }
 
+// Alle 10 Minuten neu verbinden
 setInterval(() => startTikTok(currentStreamer), 10 * 60 * 1000);
+
+// Erster Start
 startTikTok(currentStreamer);
 
 // https://www.eulerstream.com/dashboard/api-keys
