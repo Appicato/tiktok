@@ -1,35 +1,40 @@
-import cors from "cors";
 import express from "express";
+import cors from "cors";
 import fetch from "node-fetch";
-import pkg from "tiktok-live-connector";
 import { WebSocketServer } from "ws";
+import pkg from "tiktok-live-connector";
 
 const { WebcastPushConnection } = pkg;
 
-const EULER_API_KEY = "DEIN_EULER_API_KEY";
+const EULER_API_KEY =
+  "MWU4MWE1NmQyODQxYTg2ZjNlZTU3N2E5ZDFhMmI4YTVjM2YzY2YyNDZhYTYzYzJiNjRlMjg0";
 
 const app = express();
 app.use(cors());
 
+// Lokaler Proxy-Endpunkt, um DNS-Block zu umgehen
 app.get("/api/live-status/:username", async (req, res) => {
   const username = req.params.username;
-  const eulerUrl = `https://api.eulerstream.com/api/live/status?username=${username}`;
+  const eulerUrl = `https://api.eulerstream.io/api/live/status?username=${username}`;
 
   try {
-    const r = await fetch(eulerUrl, {
+    let r = await fetch(eulerUrl, {
       headers: { "x-api-key": EULER_API_KEY },
     });
 
+    // Falls DNS-Fehler oder kein Erfolg → Proxy nutzen
     if (!r.ok) {
-      console.warn("⚠️ Eulerstream API antwortet nicht korrekt:", r.status);
-      return res.status(r.status).json({ error: "Eulerstream API Fehler" });
+      console.warn("⚠️ Eulerstream nicht erreichbar, nutze Proxy...");
+      r = await fetch(`https://corsproxy.io/?${encodeURIComponent(eulerUrl)}`, {
+        headers: { "x-api-key": EULER_API_KEY },
+      });
     }
 
     const data = await r.json();
-    return res.json(data);
+    res.json(data);
   } catch (err) {
-    console.error("❌ Fehler bei Eulerstream API:", err);
-    return res.status(500).json({ error: "Eulerstream API nicht erreichbar" });
+    console.error("❌ Proxy-Fehler:", err);
+    res.status(500).json({ error: "Live-Status nicht abrufbar" });
   }
 });
 
@@ -41,7 +46,7 @@ const wss = new WebSocketServer({ server });
 
 const connections = new Set();
 let tiktokConnection = null;
-let currentStreamer = "mo__dawa";
+let currentStreamer = "bonusgamertv";
 
 wss.on("connection", (ws) => {
   console.log("📡 Frontend verbunden");
@@ -80,22 +85,17 @@ function safeGiftData(data) {
   return data;
 }
 
-// **Hier den Live-Status via lokalen Proxy abfragen!**
+// Live-Check jetzt über lokalen Proxy
 async function isUserLive(username) {
   try {
     const res = await fetch(
       `http://localhost:3001/api/live-status/${username}`
     );
-
-    if (!res.ok) {
-      console.error("Fehler beim lokalen Live-Status-Proxy:", res.status);
-      return false;
-    }
-
+    if (!res.ok) return false;
     const data = await res.json();
     return data.live === true;
   } catch (err) {
-    console.error("Fehler beim lokalen Live-Status-Proxy:", err);
+    console.error("Fehler beim lokalen Live-Status:", err);
     return false;
   }
 }
@@ -155,11 +155,8 @@ async function startTikTok(username) {
   });
 }
 
-// Intervall verlängert (10 min)
 setInterval(() => startTikTok(currentStreamer), 10 * 60 * 1000);
-
 startTikTok(currentStreamer);
-
 
 // https://www.eulerstream.com/dashboard/api-keys
 //https://github.com/isaackogan/TikTokLive
