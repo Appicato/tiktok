@@ -7,35 +7,23 @@ import pkg from "tiktok-live-connector";
 const { WebcastPushConnection } = pkg;
 
 const PORT = process.env.PORT || 3001;
-
-const EULER_API_KEY =
-  "MWU4MWE1NmQyODQxYTg2ZjNlZTU3N2E5ZDFhMmI4YTVjM2YzY2YyNDZhYTYzYzJiNjRlMjg0";
+const EULER_API_KEY = process.env.EULER_API_KEY; // aus Render Env
 
 const app = express();
 app.use(cors());
 
-// Lokaler Proxy-Endpunkt, um DNS-Block zu umgehen
+// Optional: Proxy-Endpoint, falls DNS bei Render auch mal spinnt
 app.get("/api/live-status/:username", async (req, res) => {
   const username = req.params.username;
-  const eulerUrl = `https://api.eulerstream.io/api/live/status?username=${username}`;
-
+  const eulerUrl = `https://api.eulerstream.com/api/live/status?username=${username}`;
   try {
-    let r = await fetch(eulerUrl, {
+    const r = await fetch(eulerUrl, {
       headers: { "x-api-key": EULER_API_KEY },
     });
-
-    // Falls DNS-Fehler oder kein Erfolg → Proxy nutzen
-    if (!r.ok) {
-      console.warn("⚠️ Eulerstream nicht erreichbar, nutze Proxy...");
-      r = await fetch(`https://corsproxy.io/?${encodeURIComponent(eulerUrl)}`, {
-        headers: { "x-api-key": EULER_API_KEY },
-      });
-    }
-
     const data = await r.json();
     res.json(data);
   } catch (err) {
-    console.error("❌ Proxy-Fehler:", err);
+    console.error("❌ Live-Status Fehler:", err);
     res.status(500).json({ error: "Live-Status nicht abrufbar" });
   }
 });
@@ -73,27 +61,20 @@ wss.on("connection", (ws) => {
 function broadcast(data) {
   const msg = JSON.stringify(data);
   for (const ws of connections) {
-    if (ws.readyState === ws.OPEN) {
-      ws.send(msg);
-    }
+    if (ws.readyState === ws.OPEN) ws.send(msg);
   }
 }
 
 function safeGiftData(data) {
-  if (!data.giftDetails) {
-    console.warn("Warnung: giftDetails fehlt im Geschenk-Event.");
-    return null;
-  }
-  return data;
+  return data.giftDetails ? data : null;
 }
 
-// Live-Check jetzt über lokalen Proxy
 async function isUserLive(username) {
   try {
-    const eulerUrl = `https://api.eulerstream.com/api/live/status?username=${username}`;
-    const res = await fetch(eulerUrl, {
-      headers: { "x-api-key": EULER_API_KEY },
-    });
+    const res = await fetch(
+      `https://api.eulerstream.com/api/live/status?username=${username}`,
+      { headers: { "x-api-key": EULER_API_KEY } }
+    );
     if (!res.ok) return false;
     const data = await res.json();
     return data.live === true;
@@ -140,7 +121,7 @@ async function startTikTok(username) {
 
   safeBroadcast("gift", (data) => {
     const safeData = safeGiftData(data);
-    if (!safeData || !safeData.giftName) return;
+    if (!safeData) return;
     broadcast({
       type: "gift",
       user: safeData.uniqueId,
