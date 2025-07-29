@@ -5,6 +5,14 @@ import { WebSocketServer } from "ws";
 
 const { WebcastPushConnection } = pkg;
 
+// 🔹 Globale Error-Handler → Server stürzt nicht ab
+process.on("uncaughtException", (err) => {
+  console.error("❌ Uncaught Exception:", err);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("❌ Unhandled Rejection:", reason);
+});
+
 const PORT = process.env.PORT || 3001;
 
 const app = express();
@@ -52,8 +60,13 @@ function broadcast(data) {
   }
 }
 
+// 🔹 Sicherer Gift-Handler → verhindert giftDetails-Fehler
 function safeGiftData(data) {
-  return data.giftDetails ? data : null;
+  if (!data.giftDetails || !data.giftName) {
+    console.warn("⚠️ Ungültiges Geschenk-Event empfangen – überspringe.");
+    return null;
+  }
+  return data;
 }
 
 async function startTikTok(username) {
@@ -89,10 +102,12 @@ async function startTikTok(username) {
     });
   };
 
+  // Chat
   safeBroadcast("chat", (data) => {
     broadcast({ type: "chat", user: data.uniqueId, comment: data.comment });
   });
 
+  // Gifts (mit Fix)
   safeBroadcast("gift", (data) => {
     const safeData = safeGiftData(data);
     if (!safeData) return;
@@ -104,10 +119,12 @@ async function startTikTok(username) {
     });
   });
 
+  // Likes
   safeBroadcast("like", (data) => {
     broadcast({ type: "like", user: data.uniqueId, likes: data.likeCount });
   });
 
+  // Zuschauer
   safeBroadcast("roomUser", (data) => {
     broadcast({ type: "viewers", count: data.viewerCount });
   });
@@ -118,8 +135,3 @@ setInterval(() => startTikTok(currentStreamer), 10 * 60 * 1000);
 
 // Erster Start
 startTikTok(currentStreamer);
-
-// https://www.eulerstream.com/dashboard/api-keys
-//https://github.com/isaackogan/TikTokLive
-// https://chatgpt.com/c/6888d086-375c-8326-abac-48ce6d37657b
-// https://github.com/zerodytrash/TikTok-Live-Connector
