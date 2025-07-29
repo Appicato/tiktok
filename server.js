@@ -5,7 +5,7 @@ import { WebSocketServer } from "ws";
 
 const { WebcastPushConnection } = pkg;
 
-// 🔹 Globale Error-Handler → Server stürzt nicht ab
+// 🔹 Globale Error-Handler
 process.on("uncaughtException", (err) => {
   console.error("❌ Uncaught Exception:", err);
 });
@@ -14,11 +14,10 @@ process.on("unhandledRejection", (reason) => {
 });
 
 const PORT = process.env.PORT || 3001;
-
 const app = express();
 app.use(cors());
 
-// Einfacher Test-Endpoint
+// Test-Endpoint
 app.get("/", (req, res) => {
   res.send("✅ TikTok Backend läuft");
 });
@@ -28,110 +27,131 @@ const server = app.listen(PORT, () => {
 });
 
 const wss = new WebSocketServer({ server });
+const connections = new Map(); // Map: ws → { username, tiktokConnection }
 
-const connections = new Set();
-let tiktokConnection = null;
-let currentStreamer = "bodenlos_yt";
-
+// WebSocket-Verbindung
 wss.on("connection", (ws) => {
   console.log("📡 Frontend verbunden");
-  connections.add(ws);
+
+  // Verbindung in Map speichern
+  connections.set(ws, { username: null, tiktokConnection: null });
 
   ws.on("message", async (msg) => {
     try {
       const data = JSON.parse(msg);
       if (data.type === "changeStreamer" && data.username) {
         console.log(`🎯 Streamer wechseln zu: ${data.username}`);
-        currentStreamer = data.username;
-        await startTikTok(currentStreamer);
+        await startTikTokForClient(ws, data.username);
       }
-    } catch {}
+    } catch (err) {
+      console.error("❌ Fehler bei eingehender Nachricht:", err);
+    }
   });
 
   ws.on("close", () => {
+    const client = connections.get(ws);
+    if (client?.tiktokConnection) {
+      client.tiktokConnection.disconnect();
+    }
     connections.delete(ws);
   });
 });
 
+// Broadcast an **alle** verbundenen Clients
 function broadcast(data) {
   const msg = JSON.stringify(data);
-  for (const ws of connections) {
-    if (ws.readyState === ws.OPEN) ws.send(msg);
+  for (const [client] of connections) {
+    if (client.readyState === client.OPEN) {
+      client.send(msg);
+    }
   }
 }
 
-// 🔹 Sicherer Gift-Handler → verhindert giftDetails-Fehler
+// 🔹 Sicherer Gift-Handler
 function safeGiftData(data) {
-  if (!data.giftDetails || !data.giftName) {
-    console.warn("⚠️ Ungültiges Geschenk-Event empfangen – überspringe.");
+  if (!data.giftDetails || !data.giftDetails.giftImage || !data.giftName) {
+    console.warn("⚠️ Ungültiges Geschenk-Event – überspringe.");
     return null;
   }
   return data;
 }
 
-async function startTikTok(username) {
-  // Alte Verbindung schließen
-  if (tiktokConnection) {
-    await tiktokConnection.disconnect();
-    tiktokConnection = null;
+// 🔹 Starte TikTok-Stream für einen bestimmten Client
+async function startTikTokForClient(ws, username) {
+  const clientData = connections.get(ws);
+
+  // Alte Verbindung trennen
+  if (clientData?.tiktokConnection) {
+    await clientData.tiktokConnection.disconnect();
   }
 
   console.log(`🔍 Versuche Verbindung zu ${username}...`);
-
-  tiktokConnection = new WebcastPushConnection(username);
+  const tiktokConnection = new WebcastPushConnection(username);
 
   try {
     await tiktokConnection.connect();
     console.log(`✅ ${username} ist live – verbunden!`);
-    broadcast({ type: "status", live: true, username });
-  } catch (err) {
+    ws.send(JSON.stringify({ type: "status", live: true, username }));
+  } catch {
     console.log(
       `⚠️ ${username} ist aktuell nicht live oder Verbindung fehlgeschlagen.`
     );
-    broadcast({ type: "status", live: false, username });
+    ws.send(JSON.stringify({ type: "status", live: false, username }));
     return;
   }
 
-  const safeBroadcast = (type, handler) => {
-    tiktokConnection.on(type, (data) => {
-      try {
-        handler(data);
-      } catch (err) {
-        console.error(`❌ Fehler beim Event ${type}:`, err);
-      }
-    });
-  };
+  // Speichern
+  connections.set(ws, { username, tiktokConnection });
 
-  // Chat
-  safeBroadcast("chat", (data) => {
-    broadcast({ type: "chat", user: data.uniqueId, comment: data.comment });
+  // Fehler-Events abfangen
+  tiktokConnection.on("error", (err) => {
+    console.warn("⚠️ TikTok-Event-Fehler:", err?.message || err);
   });
 
-  // Gifts (mit Fix)
-  safeBroadcast("gift", (data) => {
+  // Stream-Ende
+  tiktokConnection.on("streamEnd", () => {
+    console.log(`📴 Stream von ${username} beendet.`);
+    ws.send(JSON.stringify({ type: "status", live: false, username }));
+  });
+
+  // Chat
+  tiktokConnection.on("chat", (data) => {
+    ws.send(
+      JSON.stringify({
+        type: "chat",
+        user: data.uniqueId,
+        comment: data.comment,
+      })
+    );
+  });
+
+  // Gifts
+  tiktokConnection.on("gift", (data) => {
     const safeData = safeGiftData(data);
     if (!safeData) return;
-    broadcast({
-      type: "gift",
-      user: safeData.uniqueId,
-      gift: safeData.giftName,
-      amount: safeData.repeatCount || 1,
-    });
+    ws.send(
+      JSON.stringify({
+        type: "gift",
+        user: safeData.uniqueId,
+        gift: safeData.giftName,
+        amount: safeData.repeatCount || 1,
+      })
+    );
   });
 
   // Likes
-  safeBroadcast("like", (data) => {
-    broadcast({ type: "like", user: data.uniqueId, likes: data.likeCount });
+  tiktokConnection.on("like", (data) => {
+    ws.send(
+      JSON.stringify({
+        type: "like",
+        user: data.uniqueId,
+        likes: data.likeCount,
+      })
+    );
   });
 
   // Zuschauer
-  safeBroadcast("roomUser", (data) => {
-    broadcast({ type: "viewers", count: data.viewerCount });
+  tiktokConnection.on("roomUser", (data) => {
+    ws.send(JSON.stringify({ type: "viewers", count: data.viewerCount }));
   });
 }
-
-// Alle 10 Minuten neu verbinden
-setInterval(() => startTikTok(currentStreamer), 10 * 60 * 1000);
-
-// Erster Start
-startTikTok(currentStreamer);
