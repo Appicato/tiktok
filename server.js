@@ -40,6 +40,16 @@ wss.on("connection", (ws) => {
     try {
       const data = JSON.parse(msg);
       if (data.type === "changeStreamer" && data.username) {
+        const clientData = connections.get(ws);
+
+        // 🚫 Falls der gleiche Streamer bereits aktiv ist → Ignorieren
+        if (clientData?.username && clientData.username === data.username) {
+          console.log(
+            `⏩ Streamer ${data.username} ist bereits verbunden – ignoriere Anfrage.`
+          );
+          return;
+        }
+
         console.log(`🎯 Streamer wechseln zu: ${data.username}`);
         await startTikTokForClient(ws, data.username);
       }
