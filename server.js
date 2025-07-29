@@ -23,7 +23,7 @@ const wss = new WebSocketServer({ server });
 
 const connections = new Set();
 let tiktokConnection = null;
-let currentStreamer = "bonusgamertv";
+let currentStreamer = "bodenlos_yt";
 
 wss.on("connection", (ws) => {
   console.log("📡 Frontend verbunden");
