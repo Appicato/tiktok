@@ -6,6 +6,8 @@ import pkg from "tiktok-live-connector";
 
 const { WebcastPushConnection } = pkg;
 
+const PORT = process.env.PORT || 3001;
+
 const EULER_API_KEY =
   "MWU4MWE1NmQyODQxYTg2ZjNlZTU3N2E5ZDFhMmI4YTVjM2YzY2YyNDZhYTYzYzJiNjRlMjg0";
 
@@ -38,8 +40,8 @@ app.get("/api/live-status/:username", async (req, res) => {
   }
 });
 
-const server = app.listen(3001, () => {
-  console.log("✅ TikTok Backend läuft auf Port 3001");
+const server = app.listen(PORT, () => {
+  console.log(`✅ TikTok Backend läuft auf Port ${PORT}`);
 });
 
 const wss = new WebSocketServer({ server });
@@ -88,14 +90,15 @@ function safeGiftData(data) {
 // Live-Check jetzt über lokalen Proxy
 async function isUserLive(username) {
   try {
-    const res = await fetch(
-      `http://localhost:3001/api/live-status/${username}`
-    );
+    const eulerUrl = `https://api.eulerstream.com/api/live/status?username=${username}`;
+    const res = await fetch(eulerUrl, {
+      headers: { "x-api-key": EULER_API_KEY },
+    });
     if (!res.ok) return false;
     const data = await res.json();
     return data.live === true;
   } catch (err) {
-    console.error("Fehler beim lokalen Live-Status:", err);
+    console.error("Fehler bei Eulerstream API:", err);
     return false;
   }
 }
