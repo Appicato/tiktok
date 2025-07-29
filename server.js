@@ -1,8 +1,8 @@
-import express from "express";
 import cors from "cors";
+import express from "express";
 import fetch from "node-fetch";
-import { WebSocketServer } from "ws";
 import pkg from "tiktok-live-connector";
+import { WebSocketServer } from "ws";
 
 const { WebcastPushConnection } = pkg;
 
@@ -15,7 +15,7 @@ app.use(cors());
 // Optional: Proxy-Endpoint, falls DNS bei Render auch mal spinnt
 app.get("/api/live-status/:username", async (req, res) => {
   const username = req.params.username;
-  const eulerUrl = `https://api.eulerstream.com/api/live/status?username=${username}`;
+  const eulerUrl = `https://api.eulerstream.io/api/live/status?username=${username}`;
   try {
     const r = await fetch(eulerUrl, {
       headers: { "x-api-key": EULER_API_KEY },
@@ -71,10 +71,10 @@ function safeGiftData(data) {
 
 async function isUserLive(username) {
   try {
-    const res = await fetch(
-      `https://api.eulerstream.com/api/live/status?username=${username}`,
-      { headers: { "x-api-key": EULER_API_KEY } }
-    );
+    const eulerUrl = `https://api.eulerstream.io/api/live/status?username=${username}`;
+    const res = await fetch(eulerUrl, {
+      headers: { "x-api-key": EULER_API_KEY },
+    });
     if (!res.ok) return false;
     const data = await res.json();
     return data.live === true;
